@@ -11,6 +11,14 @@ from negotiate_env.scenarios import SCENARIOS
 from negotiate_env.server.difficulty import get_difficulty
 from negotiate_env.server.opponent import AEOpponent
 
+# Multi-app imports for Track 3.1
+try:
+    from negotiate_env.apps.crm import SalesforceCRM
+    from negotiate_env.apps.approval import ApprovalWorkflow
+    MULTI_APP_ENABLED = True
+except ImportError:
+    MULTI_APP_ENABLED = False
+
 
 class NegotiateEnvironment(Environment):
     """RL environment: agent (procurement manager) negotiates with rule-based AE.
