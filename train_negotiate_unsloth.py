@@ -113,10 +113,24 @@ def env_step(env_url: str, action: dict, session_id: str) -> dict:
     
     for attempt in range(max_retries):
         try:
-            r = requests.post(f"{env_url}/step", json={"action": action, "session_id": session_id}, timeout=30)
+            payload = {"action": action, "session_id": session_id}
+            r = requests.post(f"{env_url}/step", json=payload, timeout=30)
             r.raise_for_status()
             data = r.json()
             return data.get("observation", data)
+        except requests.exceptions.HTTPError as e:
+            if attempt < max_retries - 1:
+                # Log the error details for debugging
+                try:
+                    error_detail = r.json() if r.text else str(e)
+                    print(f"[warn] Step failed (attempt {attempt+1}/{max_retries}): {e}")
+                    print(f"[warn] Error detail: {error_detail}")
+                    print(f"[warn] Action sent: {action}")
+                except:
+                    print(f"[warn] Step failed (attempt {attempt+1}/{max_retries}): {e}")
+                time.sleep(retry_delay)
+            else:
+                raise
         except Exception as e:
             if attempt < max_retries - 1:
                 print(f"[warn] Step failed (attempt {attempt+1}/{max_retries}): {e}")
@@ -177,7 +191,14 @@ def parse_to_action(text: str) -> dict:
     try:
         data = json.loads(text)
         if data.get("action_type") in valid_types:
-            return data
+            # Ensure all required fields are present with defaults
+            return {
+                "action_type": data.get("action_type", "counter"),
+                "price_per_seat": float(data.get("price_per_seat", 0.0)),
+                "contract_length": float(data.get("contract_length", 0.0)),
+                "annual_increase_cap": float(data.get("annual_increase_cap", 0.0)),
+                "message": str(data.get("message", "")),
+            }
     except Exception:
         pass
 
@@ -186,7 +207,13 @@ def parse_to_action(text: str) -> dict:
         try:
             data = json.loads(m.group())
             if data.get("action_type") in valid_types:
-                return data
+                return {
+                    "action_type": data.get("action_type", "counter"),
+                    "price_per_seat": float(data.get("price_per_seat", 0.0)),
+                    "contract_length": float(data.get("contract_length", 0.0)),
+                    "annual_increase_cap": float(data.get("annual_increase_cap", 0.0)),
+                    "message": str(data.get("message", "")),
+                }
         except Exception:
             pass
 
