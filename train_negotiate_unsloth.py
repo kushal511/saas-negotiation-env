@@ -48,10 +48,10 @@ parser = argparse.ArgumentParser(description="NegotiateEnv GRPO training with Un
 parser.add_argument("--model-id", default="Qwen/Qwen2.5-1.5B-Instruct")
 parser.add_argument("--env-url", default="http://localhost:7860",
                     help="URL of running NegotiateEnv server (local or HF Space)")
-parser.add_argument("--max-turns", type=int, default=6,
-                    help="Max turns per negotiation episode inside reward function")
-parser.add_argument("--num-episodes", type=int, default=300,
-                    help="Number of dataset entries (each triggers one rollout)")
+parser.add_argument("--max-turns", type=int, default=50,
+                    help="Max turns per negotiation episode (long-horizon: 50)")
+parser.add_argument("--num-episodes", type=int, default=1000,
+                    help="Number of dataset entries for long-horizon training")
 parser.add_argument("--output-dir", default="negotiate-unsloth-output")
 parser.add_argument("--lora-rank", type=int, default=16)
 parser.add_argument("--max-seq-length", type=int, default=1024)

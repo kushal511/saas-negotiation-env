@@ -11,6 +11,15 @@ from negotiate_env.scenarios import SCENARIOS
 from negotiate_env.server.difficulty import get_difficulty
 from negotiate_env.server.opponent import AEOpponent
 
+# Long-horizon planning imports
+from negotiate_env.server.instructions import (
+    check_instruction_compliance,
+    get_instruction_penalty,
+    get_relevant_instructions,
+    format_instructions_for_prompt,
+)
+from negotiate_env.server.sales_workflow import SalesWorkflowManager
+
 # Multi-app imports for Track 3.1
 try:
     from negotiate_env.apps.crm import SalesforceCRM
@@ -26,15 +35,25 @@ class NegotiateEnvironment(Environment):
     Args:
         difficulty: "easy" | "medium" (default) | "hard"
         use_hf_dataset: If True, load scenarios from HuggingFace on first reset.
+        enable_instructions: If True, enforce 300+ scattered instructions.
+        enable_workflow: If True, track 8-stage sales workflow.
     """
 
     SUPPORTS_CONCURRENT_SESSIONS: bool = True
 
-    def __init__(self, difficulty: str = "medium", use_hf_dataset: bool = False):
+    def __init__(
+        self,
+        difficulty: str = "medium",
+        use_hf_dataset: bool = False,
+        enable_instructions: bool = True,
+        enable_workflow: bool = False,
+    ):
         super().__init__()
         self._difficulty_name = difficulty
         self._difficulty = get_difficulty(difficulty)
         self._use_hf_dataset = use_hf_dataset
+        self._enable_instructions = enable_instructions
+        self._enable_workflow = enable_workflow
         self._scenarios: list[dict[str, Any]] = []
         self._action_counter: Counter = Counter()  # strategy discovery metrics
         self._step_count: int = 0
@@ -48,6 +67,11 @@ class NegotiateEnvironment(Environment):
         self._agent_max_price: float = 0.0
         self._agent_max_length: float = 0.0
         self._agent_max_cap: float = 0.0
+        
+        # Long-horizon planning components
+        self._workflow_manager: Optional[SalesWorkflowManager] = None
+        if self._enable_workflow:
+            self._workflow_manager = SalesWorkflowManager()
         self._max_turns: int = self._difficulty.max_turns
         self._enable_drift: bool = self._difficulty.enable_drift
         self._conversation_history: list[str] = []
@@ -142,10 +166,33 @@ class NegotiateEnvironment(Environment):
     ) -> NegotiateObservation:
         self._step_count += 1
         turn = self._step_count
-        self._turn_penalties += 0.01
+        # Proportional turn penalty: scales with episode length (total max = 0.10)
+        penalty_per_turn = 0.10 / self._max_turns
+        self._turn_penalties += penalty_per_turn
 
         # Track strategy discovery metrics
         self._action_counter[action.action_type] += 1
+        
+        # Long-horizon: Check instruction compliance
+        instruction_violations = []
+        if self._enable_instructions:
+            state = {
+                "current_offer": self._current_offer,
+                "remaining_budget": getattr(self, "_remaining_budget", None),
+                "total_budget": getattr(self, "_total_budget", None),
+                "turn_number": turn,
+                "vendor": self._scenario.get("vendor", ""),
+                "estimated_deal_value": self._scenario.get("budget", 0),
+                "current_deal_priority": getattr(self, "_current_deal_priority", "medium"),
+            }
+            instruction_violations = check_instruction_compliance(action, state)
+            if instruction_violations:
+                penalty = get_instruction_penalty(instruction_violations)
+                self._turn_penalties += penalty
+        
+        # Long-horizon: Update sales workflow stage
+        if self._enable_workflow and self._workflow_manager:
+            self._workflow_manager.check_stage_transition(turn, action.action_type)
 
         # Inject drift exactly once at drift_turn
         if (
@@ -270,6 +317,22 @@ class NegotiateEnvironment(Environment):
         done: bool,
         reward: float,
     ) -> NegotiateObservation:
+        # Get relevant instructions for current state
+        active_instructions_list = []
+        if self._enable_instructions:
+            state = {
+                "vendor": self._scenario.get("vendor", ""),
+                "remaining_budget": getattr(self, "_remaining_budget", None),
+                "total_budget": getattr(self, "_total_budget", None),
+            }
+            relevant_insts = get_relevant_instructions(state, max_instructions=5)
+            active_instructions_list = [f"#{inst['id']}: {inst['rule']}" for inst in relevant_insts]
+        
+        # Get workflow stage info
+        workflow_stage = "negotiation"
+        if self._enable_workflow and self._workflow_manager:
+            workflow_stage = self._workflow_manager.current_stage.value
+        
         return NegotiateObservation(
             context=self._scenario["context"],
             your_max_price=self._agent_max_price,
@@ -283,6 +346,10 @@ class NegotiateEnvironment(Environment):
             current_offer=dict(self._current_offer),
             reward=reward,
             done=done,
+            # Long-horizon fields
+            competitor_price=self._scenario.get("competitor_price", 0.0),
+            active_instructions=active_instructions_list,
+            workflow_stage=workflow_stage,
         )
 
     def _compute_reward(self, deal: dict[str, Any]) -> float:

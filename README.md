@@ -4,6 +4,32 @@
 
 An OpenEnv-compatible RL environment where an LLM agent plays a **procurement manager** negotiating a B2B SaaS contract against a rule-based **Account Executive (AE)** opponent with a hidden reservation price.
 
+## 🚀 Super Long-Horizon Planning
+
+NegotiateEnv implements **super long-horizon planning** for Statement 2:
+
+- **Extended Episodes**: 30-50 turns (vs 7-12 in baseline)
+- **Multi-Deal Scenarios**: Negotiate 5+ contracts with shared $500k budget
+- **Sparse Rewards**: Only at final deal completion (extreme delayed feedback)
+- **State Tracking**: Must remember previous deals, budget, dependencies, quotas
+- **300+ Scattered Instructions**: Agent must follow complex rules throughout
+- **Recovery Mechanisms**: Can renegotiate bad deals
+- **Full Sales Workflow**: 8 stages from lead qualification to onboarding (50 turns)
+
+### Scale AI Partner Theme: Sales Workflows
+
+Complete B2B sales workflow in business setting:
+1. **Lead Qualification** (Turn 1-5): Assess fit and budget
+2. **Discovery** (Turn 6-10): Understand needs and pain points
+3. **Proposal** (Turn 11-15): Present solution and pricing
+4. **Negotiation** (Turn 16-30): Negotiate terms and contract
+5. **Contract Review** (Turn 31-35): Legal and compliance review
+6. **Approval** (Turn 36-40): Stakeholder sign-off
+7. **Closing** (Turn 41-45): Finalize and sign contract
+8. **Onboarding Handoff** (Turn 46-50): Transition to customer success
+
+Agents must plan across 50+ turns, track complex state, follow scattered instructions, and recover from early mistakes.
+
 ---
 
 ## Why Negotiation?
