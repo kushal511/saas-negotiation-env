@@ -82,7 +82,8 @@ Always respond with valid JSON only."""
 # Environment helpers (pure HTTP, no dependency on installed negotiate_env pkg)
 # ---------------------------------------------------------------------------
 
-def env_reset(env_url: str, scenario_id: str | None = None) -> dict:
+def env_reset(env_url: str, scenario_id: str | None = None) -> tuple[dict, str]:
+    """Reset environment and return (observation, session_id)."""
     max_retries = 3
     retry_delay = 2
     
@@ -94,7 +95,9 @@ def env_reset(env_url: str, scenario_id: str | None = None) -> dict:
             r = requests.post(f"{env_url}/reset", json=payload, timeout=30)
             r.raise_for_status()
             data = r.json()
-            return data.get("observation", data)
+            session_id = data.get("session_id")
+            obs = data.get("observation", data)
+            return obs, session_id
         except Exception as e:
             if attempt < max_retries - 1:
                 print(f"[warn] Reset failed (attempt {attempt+1}/{max_retries}): {e}")
@@ -103,13 +106,14 @@ def env_reset(env_url: str, scenario_id: str | None = None) -> dict:
                 raise
 
 
-def env_step(env_url: str, action: dict) -> dict:
+def env_step(env_url: str, action: dict, session_id: str) -> dict:
+    """Take a step with the given session_id."""
     max_retries = 3
     retry_delay = 2
     
     for attempt in range(max_retries):
         try:
-            r = requests.post(f"{env_url}/step", json={"action": action}, timeout=30)
+            r = requests.post(f"{env_url}/step", json={"action": action, "session_id": session_id}, timeout=30)
             r.raise_for_status()
             data = r.json()
             return data.get("observation", data)
@@ -233,7 +237,7 @@ def reward_negotiate(completions: list[str], prompts: list[str], **kwargs) -> li
     try:
         for completion in completions:
             try:
-                obs = env_reset(cli_args.env_url)
+                obs, session_id = env_reset(cli_args.env_url)
                 if obs.get("done", False):
                     rewards.append(0.0)
                     continue
@@ -242,7 +246,7 @@ def reward_negotiate(completions: list[str], prompts: list[str], **kwargs) -> li
 
                 # Turn 0: use GRPO's pre-generated completion so its gradient matters
                 action = parse_to_action(completion)
-                obs = env_step(cli_args.env_url, action)
+                obs = env_step(cli_args.env_url, action, session_id)
                 if obs.get("done", False):
                     final_reward = float(obs.get("reward", 0.0))
                     rewards.append(final_reward)
@@ -284,7 +288,7 @@ def reward_negotiate(completions: list[str], prompts: list[str], **kwargs) -> li
                     completion_text = tokenizer.decode(new_token_ids, skip_special_tokens=True)
 
                     action = parse_to_action(completion_text)
-                    obs = env_step(cli_args.env_url, action)
+                    obs = env_step(cli_args.env_url, action, session_id)
 
                     if obs.get("done", False):
                         final_reward = float(obs.get("reward", 0.0))
@@ -314,7 +318,7 @@ def build_dataset(env_url: str, n: int, tokenizer) -> Dataset:
     prompts = []
     for _ in range(n):
         try:
-            obs = env_reset(env_url)
+            obs, _ = env_reset(env_url)  # Ignore session_id for dataset building
             user_content = obs_to_prompt(obs)
         except Exception:
             user_content = "Negotiate a B2B SaaS contract. Respond with a JSON action."
