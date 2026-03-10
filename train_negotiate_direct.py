@@ -47,6 +47,7 @@ cli_args = parser.parse_args()
 # ---------------------------------------------------------------------------
 model = None
 tokenizer = None
+shared_env = None  # Shared environment to avoid reloading dataset
 
 # ---------------------------------------------------------------------------
 # System prompt
@@ -161,7 +162,7 @@ def reward_negotiate(completions: list[str], prompts: list[str], **kwargs) -> li
       3. Turns 1+: call model.generate for every subsequent turn.
       4. Return the final episode reward as the training signal.
     """
-    if model is None or tokenizer is None:
+    if model is None or tokenizer is None or shared_env is None:
         return [0.0] * len(completions)
 
     rewards = []
@@ -171,14 +172,8 @@ def reward_negotiate(completions: list[str], prompts: list[str], **kwargs) -> li
     try:
         for completion in completions:
             try:
-                # Create fresh environment for this episode
-                env = NegotiateEnvironment(
-                    difficulty=cli_args.difficulty,
-                    use_hf_dataset=True,
-                    enable_instructions=True,
-                    enable_workflow=False,
-                )
-                obs = env.reset()
+                # Use shared environment and just reset it
+                obs = shared_env.reset()
                 
                 if obs.done:
                     rewards.append(0.0)
@@ -188,7 +183,7 @@ def reward_negotiate(completions: list[str], prompts: list[str], **kwargs) -> li
 
                 # Turn 0: use GRPO's pre-generated completion
                 action = parse_to_action(completion)
-                obs = env.step(action)
+                obs = shared_env.step(action)
                 
                 if obs.done:
                     final_reward = float(obs.reward)
@@ -231,7 +226,7 @@ def reward_negotiate(completions: list[str], prompts: list[str], **kwargs) -> li
                     completion_text = tokenizer.decode(new_token_ids, skip_special_tokens=True)
 
                     action = parse_to_action(completion_text)
-                    obs = env.step(action)
+                    obs = shared_env.step(action)
 
                     if obs.done:
                         final_reward = float(obs.reward)
@@ -254,21 +249,15 @@ def reward_negotiate(completions: list[str], prompts: list[str], **kwargs) -> li
 # ---------------------------------------------------------------------------
 
 def build_dataset(n: int, tokenizer) -> Dataset:
-    """Build dataset by resetting environment n times."""
+    """Build dataset by resetting shared environment n times."""
     prompts = []
-    env = NegotiateEnvironment(
-        difficulty=cli_args.difficulty,
-        use_hf_dataset=True,
-        enable_instructions=True,
-        enable_workflow=False,
-    )
     
     for i in range(n):
         if i % 100 == 0:
             print(f"  Building dataset: {i}/{n}")
         
         try:
-            obs = env.reset()
+            obs = shared_env.reset()
             user_content = obs_to_prompt(obs)
         except Exception as e:
             print(f"[warn] Dataset build failed for episode {i}: {e}")
@@ -293,9 +282,18 @@ def build_dataset(n: int, tokenizer) -> Dataset:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    global model, tokenizer
+    global model, tokenizer, shared_env
 
     print(f"[NegotiateEnv/Direct] Using difficulty={cli_args.difficulty} (max_turns={cli_args.max_turns})")
+    
+    # Create shared environment once
+    print(f"[NegotiateEnv/Direct] Initializing shared environment...")
+    shared_env = NegotiateEnvironment(
+        difficulty=cli_args.difficulty,
+        use_hf_dataset=True,
+        enable_instructions=True,
+        enable_workflow=False,
+    )
     
     # Load model with Unsloth
     from unsloth import FastLanguageModel
