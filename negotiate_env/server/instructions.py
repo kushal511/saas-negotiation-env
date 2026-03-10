@@ -90,9 +90,9 @@ def check_instruction_compliance(
             violations.append(SCATTERED_INSTRUCTIONS[0])  # Instruction 1
     
     # Check budget constraints
-    remaining_budget = state.get("remaining_budget", float('inf'))
-    total_budget = state.get("total_budget", float('inf'))
-    if remaining_budget < total_budget * 0.2:
+    remaining_budget = state.get("remaining_budget")
+    total_budget = state.get("total_budget")
+    if remaining_budget is not None and total_budget is not None and remaining_budget < total_budget * 0.2:
         priority = state.get("current_deal_priority", "medium")
         if priority in ["low", "medium"] and action.action_type == "accept":
             violations.append(SCATTERED_INSTRUCTIONS[18])  # Instruction 89
@@ -146,9 +146,9 @@ def get_relevant_instructions(
             relevant.append(inst)
     
     # Get budget instructions if budget is low
-    remaining_budget = state.get("remaining_budget", float('inf'))
-    total_budget = state.get("total_budget", float('inf'))
-    if remaining_budget < total_budget * 0.3:
+    remaining_budget = state.get("remaining_budget")
+    total_budget = state.get("total_budget")
+    if remaining_budget is not None and total_budget is not None and remaining_budget < total_budget * 0.3:
         for inst in SCATTERED_INSTRUCTIONS:
             if inst["category"] == "budget":
                 relevant.append(inst)
