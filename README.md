@@ -32,6 +32,181 @@ Agents must plan across 50+ turns, track complex state, follow scattered instruc
 
 ---
 
+## Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         NegotiateEnv Architecture                        │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                            TRAINING PIPELINE                             │
+└─────────────────────────────────────────────────────────────────────────┘
+
+    ┌──────────────────┐
+    │  HuggingFace     │
+    │  Dataset         │
+    │  (200 scenarios) │
+    └────────┬─────────┘
+             │
+             ▼
+    ┌──────────────────────────────────────────────────────────────┐
+    │              NegotiateEnv Server (FastAPI)                   │
+    │  ┌────────────────────────────────────────────────────────┐  │
+    │  │  Environment Core (environment.py)                     │  │
+    │  │  • Reset/Step logic                                    │  │
+    │  │  • Reward calculation (proportional penalty)           │  │
+    │  │  • State management                                    │  │
+    │  └────────────────────────────────────────────────────────┘  │
+    │                                                               │
+    │  ┌────────────────────────────────────────────────────────┐  │
+    │  │  Long-Horizon Components                               │  │
+    │  │  ┌──────────────────┐  ┌──────────────────┐           │  │
+    │  │  │ Instructions     │  │ Sales Workflow   │           │  │
+    │  │  │ (300+ rules)     │  │ (8 stages)       │           │  │
+    │  │  └──────────────────┘  └──────────────────┘           │  │
+    │  │  ┌──────────────────┐  ┌──────────────────┐           │  │
+    │  │  │ Multi-Deal Env   │  │ Difficulty       │           │  │
+    │  │  │ (5 contracts)    │  │ (30/40/50 turns) │           │  │
+    │  │  └──────────────────┘  └──────────────────┘           │  │
+    │  └────────────────────────────────────────────────────────┘  │
+    │                                                               │
+    │  ┌────────────────────────────────────────────────────────┐  │
+    │  │  Opponent (opponent.py)                                │  │
+    │  │  • 4 strategies: hardball, concession, urgency, coop   │  │
+    │  │  • Hidden floor price                                  │  │
+    │  │  • Dynamic concession model                            │  │
+    │  └────────────────────────────────────────────────────────┘  │
+    │                                                               │
+    │  Endpoints: /reset, /step, /state                            │
+    │  Port: 7860 (HTTP)                                           │
+    └───────────────────────┬───────────────────────────────────────┘
+                            │
+                            │ HTTP Requests
+                            │
+                            ▼
+    ┌──────────────────────────────────────────────────────────────┐
+    │              Training Script (train_negotiate_unsloth.py)    │
+    │  ┌────────────────────────────────────────────────────────┐  │
+    │  │  Unsloth 4-bit LoRA                                    │  │
+    │  │  • Model: Qwen/Qwen2.5-1.5B-Instruct                   │  │
+    │  │  • Method: GRPO (Group Relative Policy Optimization)   │  │
+    │  │  • Episodes: 1000                                      │  │
+    │  │  • Max turns: 50 (long-horizon)                        │  │
+    │  └────────────────────────────────────────────────────────┘  │
+    │                                                               │
+    │  Training Loop:                                               │
+    │  1. Reset environment → Get observation                       │
+    │  2. Generate action with model                                │
+    │  3. Step environment → Get reward (sparse)                    │
+    │  4. Repeat for 50 turns                                       │
+    │  5. Update policy with GRPO                                   │
+    └───────────────────────┬───────────────────────────────────────┘
+                            │
+                            ▼
+    ┌──────────────────────────────────────────────────────────────┐
+    │              Trained Model (HuggingFace Hub)                 │
+    │  • LoRA weights                                              │
+    │  • Improved negotiation strategy                             │
+    │  • Long-horizon planning capability                          │
+    └──────────────────────────────────────────────────────────────┘
+
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          EVALUATION PIPELINE                             │
+└─────────────────────────────────────────────────────────────────────────┘
+
+    ┌──────────────────┐       ┌──────────────────┐
+    │  Baseline Agents │       │  Trained Agent   │
+    │  • Random        │       │  • LLM Policy    │
+    │  • Rule-based    │       │  • GRPO-trained  │
+    └────────┬─────────┘       └────────┬─────────┘
+             │                           │
+             └───────────┬───────────────┘
+                         │
+                         ▼
+    ┌──────────────────────────────────────────────────────────────┐
+    │         Evaluation Script (evaluate_http.py)                 │
+    │  • Run 100+ episodes                                         │
+    │  • Measure: reward, success rate, turns, strategy           │
+    │  • Compare baseline vs trained                               │
+    └───────────────────────┬───────────────────────────────────────┘
+                            │
+                            ▼
+    ┌──────────────────────────────────────────────────────────────┐
+    │                    Performance Metrics                        │
+    │  • Avg Reward: 0.35-0.45 (baseline) → 0.45-0.55 (trained)   │
+    │  • Success Rate: ~60% → ~75-80%                              │
+    │  • Improvement: +20-30%                                      │
+    └──────────────────────────────────────────────────────────────┘
+
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                            DATA FLOW                                     │
+└─────────────────────────────────────────────────────────────────────────┘
+
+Observation (Agent sees):
+├─ Context (scenario description)
+├─ Your budget limits (max price, length, cap)
+├─ Current offer (price, length, cap)
+├─ Conversation history
+├─ Turn number / max turns
+├─ Active constraints (drift events)
+├─ Long-horizon fields:
+│  ├─ Competitor price
+│  ├─ Remaining budget (multi-deal)
+│  ├─ Active instructions (300+ rules)
+│  ├─ Workflow stage (8 stages)
+│  └─ Closed deals (state tracking)
+└─ Reward: 0.0 (sparse, only at end)
+
+Action (Agent chooses):
+├─ Action type: counter | probe | accept | walkaway | renegotiate
+├─ Price per seat
+├─ Contract length
+├─ Annual increase cap
+├─ Message
+└─ Deal ID (for renegotiation)
+
+Hidden State (Agent never sees):
+├─ Vendor floor price ⚠️
+├─ Vendor preferred length
+├─ Vendor min/max cap
+└─ Opponent strategy
+
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         KEY INNOVATIONS                                  │
+└─────────────────────────────────────────────────────────────────────────┘
+
+1. Proportional Turn Penalty
+   • Old: -0.01/turn × 50 = -0.50 (impossible!)
+   • New: 0.10/max_turns × turn = -0.10 max (fair!)
+
+2. Long-Horizon Planning (Statement 2)
+   • 50-turn episodes (vs 7-12 baseline)
+   • Multi-deal negotiation (5 contracts)
+   • 300+ scattered instructions
+   • 8-stage sales workflow
+
+3. Sparse Rewards
+   • No reward during negotiation
+   • Only at deal close or walkaway
+   • Tests delayed gratification
+
+4. Hidden Information
+   • Vendor floor price never revealed
+   • Agent must infer through probing
+   • Tests theory of mind
+
+5. Dynamic Opponent
+   • 4 distinct strategies
+   • Adaptive concession model
+   • Constraint drift mid-episode
+```
+
+---
+
 ## Why Negotiation?
 
 Every current OpenEnv environment (Wordle, Sudoku, Blackjack) has fully visible state and frequent rewards. Negotiation breaks both assumptions:
