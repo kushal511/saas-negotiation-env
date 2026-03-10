@@ -82,14 +82,14 @@ Always respond with valid JSON only."""
 # Environment helpers (pure HTTP, no dependency on installed negotiate_env pkg)
 # ---------------------------------------------------------------------------
 
-def env_reset(env_url: str, scenario_id: str | None = None) -> tuple[dict, str]:
+def env_reset(env_url: str, scenario_id: str | None = None, difficulty: str = "hard") -> tuple[dict, str]:
     """Reset environment and return (observation, session_id)."""
     max_retries = 3
     retry_delay = 2
     
     for attempt in range(max_retries):
         try:
-            payload = {}
+            payload = {"difficulty": difficulty}
             if scenario_id:
                 payload["scenario_id"] = scenario_id
             r = requests.post(f"{env_url}/reset", json=payload, timeout=30)

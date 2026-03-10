@@ -33,6 +33,7 @@ sessions: Dict[str, NegotiateEnvironment] = {}
 class ResetRequest(BaseModel):
     scenario_id: Optional[str] = None
     session_id: Optional[str] = None
+    difficulty: Optional[str] = "hard"  # Default to hard for long-horizon (50 turns)
 
 class ResetResponse(BaseModel):
     session_id: str
@@ -82,7 +83,8 @@ def reset(request: ResetRequest = ResetRequest()):
         env = sessions[session_id]
     else:
         session_id = str(uuid.uuid4())
-        env = NegotiateEnvironment(difficulty="medium", use_hf_dataset=True)
+        difficulty = request.difficulty or "hard"  # Default to hard for 50 turns
+        env = NegotiateEnvironment(difficulty=difficulty, use_hf_dataset=True)
         sessions[session_id] = env
     
     # Reset environment
